@@ -1,0 +1,435 @@
+-- LocalScript: UltraRealisticBlackHole.lua
+-- LETAK: StarterGui (LocalScript). Akan membuat GUI di PlayerGui pada spawn.
+-- DISCLAIMER: Script heavy — kalau nge-lag, turunkan nilai di CONFIG.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+-- =========================
+-- CONFIG (sesuaikan jika perlu)
+-- =========================
+local CONFIG = {
+    OFFSET_Y = 20,            -- stud di atas kepala
+    CORE_SIZE = 20,           -- diameter inti
+    INNER_RING_COUNT = 40,    -- inner accretion ring pieces
+    OUTER_RING_COUNT = 60,    -- outer accretion ring pieces
+    PHOTON_RING_COUNT = 120,  -- photon ring tiny pieces
+    SPARK_COUNT = 5000,        -- small orbiting sparks
+    JET_SEGMENTS = 30,        -- segments per jet
+    JET_LENGTH = 120,         -- total length of jet
+    DISTORTION_LAYERS = 3,    -- outer distortion spheres
+    PERFORMANCE_SCALE = 10.0,  -- multipler (0.5 reduces instances visually)
+}
+
+-- Apply performance scale (round counts)
+CONFIG.INNER_RING_COUNT = math.max(6, math.floor(CONFIG.INNER_RING_COUNT * CONFIG.PERFORMANCE_SCALE))
+CONFIG.OUTER_RING_COUNT = math.max(6, math.floor(CONFIG.OUTER_RING_COUNT * CONFIG.PERFORMANCE_SCALE))
+CONFIG.PHOTON_RING_COUNT = math.max(10, math.floor(CONFIG.PHOTON_RING_COUNT * CONFIG.PERFORMANCE_SCALE))
+CONFIG.SPARK_COUNT = math.max(10, math.floor(CONFIG.SPARK_COUNT * CONFIG.PERFORMANCE_SCALE))
+CONFIG.JET_SEGMENTS = math.max(4, math.floor(CONFIG.JET_SEGMENTS * CONFIG.PERFORMANCE_SCALE))
+
+-- =========================
+-- Utility helpers
+-- =========================
+local function newPart(props)
+    local p = Instance.new("Part")
+    p.Size = props.Size or Vector3.new(1,1,1)
+    p.Anchored = true
+    p.CanCollide = false
+    if props.Shape then p.Shape = props.Shape end
+    p.Material = props.Material or Enum.Material.Neon
+    if props.Color then p.Color = props.Color end
+    p.Transparency = props.Transparency or 0
+    p.Parent = props.Parent
+    if props.Name then p.Name = props.Name end
+    return p
+end
+
+local function hsvToRgb(h, s, v)
+    return Color3.fromHSV(h % 1, math.clamp(s,0,1), math.clamp(v,0,1))
+end
+
+-- =========================
+-- GUI (drag-able) setup
+-- =========================
+local function makeGUI()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "UltraBH_GUI"
+    gui.ResetOnSpawn = false
+    gui.Parent = player:WaitForChild("PlayerGui")
+
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 300, 0, 140)
+    frame.Position = UDim2.new(0.1, 0, 0.15, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(20,20,22)
+    frame.BorderSizePixel = 0
+    frame.Parent = gui
+    frame.Active = true
+    frame.Draggable = true
+    local corner = Instance.new("UICorner", frame)
+    corner.CornerRadius = UDim.new(0, 12)
+
+    local title = Instance.new("TextLabel", frame)
+    title.Size = UDim2.new(1, -40, 0, 36)
+    title.Position = UDim2.new(0, 36, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Text = "BlackHole — Ultra Realistic"
+    title.TextColor3 = Color3.fromRGB(230,230,230)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local icon = Instance.new("TextLabel", frame)
+    icon.Size = UDim2.new(0, 32, 0, 32)
+    icon.Position = UDim2.new(0, 6, 0, 6)
+    icon.BackgroundColor3 = Color3.fromRGB(12,12,14)
+    icon.Text = "●"
+    icon.TextColor3 = Color3.fromRGB(170,30,180)
+    icon.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", icon).CornerRadius = UDim.new(0,8)
+
+    local closeBtn = Instance.new("TextButton", frame)
+    closeBtn.Size = UDim2.new(0, 28, 0, 28)
+    closeBtn.Position = UDim2.new(1, -34, 0, 6)
+    closeBtn.Text = "✕"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 16
+    closeBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+    closeBtn.TextColor3 = Color3.fromRGB(240,240,240)
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,8)
+
+    local toggleBtn = Instance.new("TextButton", frame)
+    toggleBtn.Size = UDim2.new(0.9, 0, 0, 40)
+    toggleBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
+    toggleBtn.Text = "TOGGLE BLACKHOLE: OFF"
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 14
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(40,40,44)
+    toggleBtn.TextColor3 = Color3.fromRGB(230,230,230)
+    Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,10)
+
+    local hint = Instance.new("TextLabel", frame)
+    hint.Size = UDim2.new(1, -20, 0, 20)
+    hint.Position = UDim2.new(0, 10, 1, -30)
+    hint.BackgroundTransparency = 1
+    hint.Text = "Tip: Tekan toggle atau tombol B"
+    hint.TextColor3 = Color3.fromRGB(190,190,190)
+    hint.Font = Enum.Font.Gotham
+    hint.TextSize = 12
+
+    return {
+        Gui = gui,
+        Frame = frame,
+        Close = closeBtn,
+        Toggle = toggleBtn
+    }
+end
+
+-- =========================
+-- Blackhole builder
+-- =========================
+local function buildBlackHoleModel()
+    local model = Instance.new("Model")
+    model.Name = "UltraBlackHole"
+
+    local core = newPart{
+        Parent = model,
+        Size = Vector3.new(CONFIG.CORE_SIZE, CONFIG.CORE_SIZE, CONFIG.CORE_SIZE),
+        Shape = Enum.PartType.Ball,
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.new(0,0,0),
+        Name = "Core"
+    }
+
+    -- create inner rings (fast, tighter)
+    local innerRings = {}
+    local innerBaseRadius = CONFIG.CORE_SIZE * 0.6
+    for i=1, CONFIG.INNER_RING_COUNT do
+        local r = newPart{
+            Parent = model,
+            Size = Vector3.new(0.35, 0.1, innerBaseRadius * 0.6),
+            Material = Enum.Material.Neon,
+            Color = hsvToRgb(0.05 + i/CONFIG.INNER_RING_COUNT*0.15, 1, 1),
+            Name = "InnerRing_"..i
+        }
+        table.insert(innerRings, r)
+    end
+
+    -- create outer rings (slower, wider)
+    local outerRings = {}
+    local outerBaseRadius = CONFIG.CORE_SIZE * 1.2
+    for i=1, CONFIG.OUTER_RING_COUNT do
+        local r = newPart{
+            Parent = model,
+            Size = Vector3.new(0.45, 0.12, outerBaseRadius + i*0.25),
+            Material = Enum.Material.Neon,
+            Color = hsvToRgb((i/CONFIG.OUTER_RING_COUNT)*0.6 + 0.2, 1, 1),
+            Name = "OuterRing_"..i
+        }
+        table.insert(outerRings, r)
+    end
+
+    -- photon ring: many small thin parts very close to core
+    local photonPieces = {}
+    local photonRadius = CONFIG.CORE_SIZE * 1.05
+    for i=1, CONFIG.PHOTON_RING_COUNT do
+        local p = newPart{
+            Parent = model,
+            Size = Vector3.new(0.2, 0.2, 0.8),
+            Material = Enum.Material.Neon,
+            Color = hsvToRgb(0.08 + (i/CONFIG.PHOTON_RING_COUNT)*0.15, 1, 1),
+            Name = "Photon_"..i
+        }
+        table.insert(photonPieces, p)
+    end
+
+    -- distortion layers (semi-transparent spheres)
+    local distortions = {}
+    for i=1, CONFIG.DISTORTION_LAYERS do
+        local scale = CONFIG.CORE_SIZE * (1.6 + i*0.9)
+        local d = newPart{
+            Parent = model,
+            Size = Vector3.new(scale, scale, scale),
+            Shape = Enum.PartType.Ball,
+            Material = Enum.Material.ForceField,
+            Color = Color3.fromRGB(170, 180, 255),
+            Transparency = 0.78 - i*0.12,
+            Name = "Distort_"..i
+        }
+        table.insert(distortions, d)
+    end
+
+    -- sparks (random orbiting neon dots)
+    local sparks = {}
+    local sparkRadiusBase = outerBaseRadius + 6
+    for i=1, CONFIG.SPARK_COUNT do
+        local s = newPart{
+            Parent = model,
+            Size = Vector3.new(0.2,0.2,0.2),
+            Material = Enum.Material.Neon,
+            Color = hsvToRgb(math.random(), 0.9, 1),
+            Transparency = 0,
+            Name = "Spark_"..i
+        }
+        table.insert(sparks, s)
+    end
+
+    -- jets: build 2 jets (north & south) as segmented thin cylinders (stacked parts)
+    local jets = { up = {}, down = {} }
+    local jetRadius = CONFIG.CORE_SIZE * 0.18
+    local segLen = CONFIG.JET_LENGTH / CONFIG.JET_SEGMENTS
+    for s=1, CONFIG.JET_SEGMENTS do
+        local upPart = newPart{
+            Parent = model,
+            Size = Vector3.new(jetRadius * (1 - s/CONFIG.JET_SEGMENTS), segLen, jetRadius * (1 - s/CONFIG.JET_SEGMENTS)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(180, 220, 255),
+            Transparency = math.clamp(s/CONFIG.JET_SEGMENTS * 0.9, 0.0, 0.9),
+            Name = "JetUp_"..s
+        }
+        local downPart = newPart{
+            Parent = model,
+            Size = upPart.Size,
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(180, 220, 255),
+            Transparency = upPart.Transparency,
+            Name = "JetDown_"..s
+        }
+        table.insert(jets.up, upPart)
+        table.insert(jets.down, downPart)
+    end
+
+    -- return model plus references for animation
+    return {
+        model = model,
+        core = core,
+        innerRings = innerRings,
+        outerRings = outerRings,
+        photon = photonPieces,
+        distortions = distortions,
+        sparks = sparks,
+        jets = jets
+    }
+end
+
+-- =========================
+-- Animation & lifecycle
+-- =========================
+local state = {
+    active = false,
+    built = nil,
+    conn = nil,
+    guiRefs = nil
+}
+
+local function cleanupModel(built)
+    if not built then return end
+    if built.model and built.model.Parent then
+        pcall(function() built.model:Destroy() end)
+    end
+end
+
+local function disconnectConn()
+    if state.conn then
+        pcall(function() state.conn:Disconnect() end)
+        state.conn = nil
+    end
+end
+
+local function spawnBlackHole()
+    if state.built then cleanupModel(state.built) end
+    local built = buildBlackHoleModel()
+    built.model.Parent = workspace
+    state.built = built
+
+    -- animation connection
+    local t0 = tick()
+    state.conn = RunService.RenderStepped:Connect(function(dt)
+        if not state.built or not state.built.core or not player.Character then
+            disconnectConn()
+            return
+        end
+        local built = state.built
+        local char = player.Character
+        local head = char:FindFirstChild("Head")
+        if not head then return end
+
+        local t = tick() - t0
+        local pos = head.Position + Vector3.new(0, CONFIG.OFFSET_Y, 0)
+        -- core & distortions
+        built.core.CFrame = CFrame.new(pos)
+        for i, d in ipairs(built.distortions) do
+            local wobble = math.sin(t * (0.6 + i*0.2) + i) * (0.3 + i*0.05)
+            local s = 1 + wobble*0.06
+            d.CFrame = built.core.CFrame
+            d.Size = Vector3.new(CONFIG.CORE_SIZE * (1.6 + i*0.9) * s, CONFIG.CORE_SIZE * (1.6 + i*0.9) * s, CONFIG.CORE_SIZE * (1.6 + i*0.9) * s)
+        end
+
+        -- inner rings (fast)
+        for j, r in ipairs(built.innerRings) do
+            local angle = t * 3.2 + j * (math.pi * 2 / #built.innerRings)
+            local radius = (CONFIG.CORE_SIZE * 0.6) + (j * 0.06)
+            local x = math.cos(angle) * radius
+            local z = math.sin(angle) * radius
+            r.CFrame = CFrame.new(pos + Vector3.new(x, 0, z)) * CFrame.Angles(math.rad(90), 0, -angle)
+            -- flicker brightness via color/value oscillation
+            local hue = (j / #built.innerRings + (math.sin(t*4 + j)*0.05)) % 1
+            r.Color = hsvToRgb(hue, 1, 1)
+        end
+
+        -- outer rings (slower, broader)
+        for j, r in ipairs(built.outerRings) do
+            local angle = t * 1.05 - j * (math.pi * 2 / #built.outerRings)
+            local radius = (CONFIG.CORE_SIZE * 1.2) + (j * 0.18) + math.sin(t*1.5 + j) * 0.35
+            local x = math.cos(angle) * radius
+            local z = math.sin(angle) * radius
+            r.CFrame = CFrame.new(pos + Vector3.new(x, 0, z)) * CFrame.Angles(math.rad(90), 0, -angle)
+            local hue = (0.1 + j / #built.outerRings * 0.6 + math.sin(t*0.6 + j)*0.02) % 1
+            r.Color = hsvToRgb(hue, 1, 1)
+        end
+
+        -- photon ring (very tight, very fast)
+        for j, p in ipairs(built.photon) do
+            local angle = t * 5.6 + j * (math.pi * 2 / #built.photon)
+            local radius = CONFIG.CORE_SIZE * 1.05 + math.sin(t*6 + j)*0.12
+            local x = math.cos(angle) * radius
+            local z = math.sin(angle) * radius
+            p.CFrame = CFrame.new(pos + Vector3.new(x, 0, z)) * CFrame.Angles(0, angle, 0)
+            -- brightness pulse
+            local v = 0.6 + 0.4 * (0.5 + 0.5*math.sin(t*8 + j))
+            p.Color = hsvToRgb(0.08 + (j/#built.photon)*0.12, 1, v)
+            p.Transparency = math.clamp(1 - v, 0.05, 0.9)
+        end
+
+        -- sparks (chaotic orbits)
+        for j, s in ipairs(built.sparks) do
+            local ang = t * (1.5 + (j%7)*0.3) + j
+            local rad = sparkRadiusBase + ((j%10) - 5) * 0.6 + math.sin(t*2 + j) * 1.5
+            local yOff = math.sin(t*2 + j) * 2.2
+            local x = math.cos(ang) * rad
+            local z = math.sin(ang) * rad
+            s.CFrame = CFrame.new(pos + Vector3.new(x, yOff, z))
+            local hue = (j/#built.sparks + math.sin(t*3 + j)*0.05) % 1
+            s.Color = hsvToRgb(hue, 1, 1)
+        end
+
+        -- jets (north & south)
+        -- up direction
+        for idx, part in ipairs(built.jets.up) do
+            local segPos = pos + Vector3.new(0, CONFIG.CORE_SIZE*0.5 + (idx-0.5)*(CONFIG.JET_LENGTH/CONFIG.JET_SEGMENTS), 0)
+            part.CFrame = CFrame.new(segPos) * CFrame.Angles(0,0,0)
+            -- scale pulsing
+            local pulse = 1 + 0.15 * math.sin(t*3 + idx)
+            part.Size = Vector3.new(part.Size.X * pulse, part.Size.Y, part.Size.Z * pulse)
+            -- color gradient along jet
+            local mix = idx / #built.jets.up
+            part.Color = Color3.new(0.6 + 0.4*(1-mix), 0.8, 1)
+        end
+        for idx, part in ipairs(built.jets.down) do
+            local segPos = pos + Vector3.new(0, -CONFIG.CORE_SIZE*0.5 - (idx-0.5)*(CONFIG.JET_LENGTH/CONFIG.JET_SEGMENTS), 0)
+            part.CFrame = CFrame.new(segPos) * CFrame.Angles(0,0,0)
+            local pulse = 1 + 0.15 * math.sin(t*3 + idx + 1.3)
+            part.Size = Vector3.new(part.Size.X * pulse, part.Size.Y, part.Size.Z * pulse)
+            local mix = idx / #built.jets.down
+            part.Color = Color3.new(0.6 + 0.4*(1-mix), 0.8, 1)
+        end
+    end)
+end
+
+-- =========================
+-- GUI interaction & lifecycle
+-- =========================
+local guiObjs = makeGUI()
+local toggleBtn = guiObjs.Toggle
+local closeBtn = guiObjs.Close
+
+local function enableBH(on)
+    if on then
+        if state.active then return end
+        state.active = true
+        toggleBtn.Text = "TOGGLE BLACKHOLE: ON"
+        spawnBlackHole()
+    else
+        if not state.active then return end
+        state.active = false
+        toggleBtn.Text = "TOGGLE BLACKHOLE: OFF"
+        disconnectConn()
+        if state.built then
+            cleanupModel(state.built)
+            state.built = nil
+        end
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    enableBH(not state.active)
+end)
+
+-- hotkey B
+local UserInputService = game:GetService("UserInputService")
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.B then
+        enableBH(not state.active)
+    end
+end)
+
+-- close button
+closeBtn.MouseButton1Click:Connect(function()
+    enableBH(false)
+    if guiObjs.Gui and guiObjs.Gui.Parent then
+        guiObjs.Gui:Destroy()
+    end
+end)
+
+-- ensure cleanup on character removal
+player.CharacterRemoving:Connect(function()
+    enableBH(false)
+end)
+
+-- initialize off
+enableBH(false)
+
+-- end of script
